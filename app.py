@@ -163,11 +163,6 @@ html, body, [data-testid="stAppViewContainer"] {
     margin-top: 0.5rem !important;
     box-shadow: 0 4px 24px rgba(124,58,255,0.35) !important;
 }
-[data-testid="stButton"] > button:hover {
-    background: linear-gradient(135deg, #6d28d9, #8b5cf6) !important;
-    box-shadow: 0 6px 32px rgba(124,58,255,0.5) !important;
-    transform: translateY(-1px) !important;
-}
 
 /* Output box */
 .output-box {
@@ -193,31 +188,6 @@ html, body, [data-testid="stAppViewContainer"] {
     color: #e8e4d9;
     word-break: break-word;
 }
-.output-seed {
-    color: #b87fff;
-    font-weight: 400;
-}
-.output-generated {
-    color: #e8e4d9;
-    opacity: 0.9;
-}
-
-/* Stats row */
-.stats-row {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1rem;
-}
-.stat-pill {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    color: #6b6880;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 100px;
-    padding: 0.25rem 0.75rem;
-    letter-spacing: 0.1em;
-}
 
 /* Error */
 .error-box {
@@ -230,58 +200,43 @@ html, body, [data-testid="stAppViewContainer"] {
     color: #ff8080;
     margin-top: 1rem;
 }
-
-/* File uploader */
-[data-testid="stFileUploader"] {
-    border: 1.5px dashed rgba(124,58,255,0.3) !important;
-    border-radius: 12px !important;
-    background: rgba(124,58,255,0.04) !important;
-    padding: 0.5rem !important;
-}
-[data-testid="stFileUploader"] label {
-    color: #7a6fa0 !important;
-    font-family: 'DM Mono', monospace !important;
-    font-size: 0.72rem !important;
-    letter-spacing: 0.15em !important;
-    text-transform: uppercase !important;
-}
-
-/* Success */
-[data-testid="stAlert"] {
-    background: rgba(40,200,100,0.07) !important;
-    border: 1px solid rgba(40,200,100,0.2) !important;
-    border-radius: 12px !important;
-    color: #7effa0 !important;
-    font-family: 'DM Mono', monospace !important;
-    font-size: 0.8rem !important;
-}
-
-/* Columns gap */
-[data-testid="column"] { padding: 0 0.4rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ─── Model Loader ────────────────────────────────────────────────────────────
+# ─── Auto Model Loader ───────────────────────────────────────────────────────
 @st.cache_resource
-def load_model_files(model_file, tokenizer_file, maxlen_file):
+def load_model_files():
     import tensorflow as tf
-    model = tf.keras.models.load_model(model_file)
-    tokenizer = pickle.load(tokenizer_file)
-    max_seq_len = pickle.load(maxlen_file)
+
+    model_path = "model_light.h5"
+    tokenizer_path = "tokenizer.pkl"
+    maxlen_path = "maxlen.pkl"
+
+    if not os.path.exists(model_path) or not os.path.exists(tokenizer_path) or not os.path.exists(maxlen_path):
+        return None, None, None
+
+    model = tf.keras.models.load_model(model_path)
+
+    with open(tokenizer_path, "rb") as f:
+        tokenizer = pickle.load(f)
+
+    with open(maxlen_path, "rb") as f:
+        max_seq_len = pickle.load(f)
+
     return model, tokenizer, max_seq_len
 
 
 # ─── Text Generator ──────────────────────────────────────────────────────────
 def generate_text(seed_text, next_words, model, tokenizer, max_seq_len, temperature=1.0):
     from tensorflow.keras.preprocessing.sequence import pad_sequences
+
     result = seed_text.strip()
     for _ in range(next_words):
         token_list = tokenizer.texts_to_sequences([result])[0]
         token_list = pad_sequences([token_list], maxlen=max_seq_len - 1, padding="pre")
         predictions = model.predict(token_list, verbose=0)[0]
 
-        # Temperature sampling
         predictions = np.log(predictions + 1e-10) / temperature
         predictions = np.exp(predictions) / np.sum(np.exp(predictions))
         predicted_index = np.random.choice(len(predictions), p=predictions)
@@ -291,63 +246,54 @@ def generate_text(seed_text, next_words, model, tokenizer, max_seq_len, temperat
             if index == predicted_index:
                 output_word = word
                 break
+
         if output_word:
             result += " " + output_word
+
     return result
 
 
 # ─── UI ──────────────────────────────────────────────────────────────────────
-
 st.markdown("""
 <div class="hero">
     <div class="hero-badge">✦ LSTM · Next Word Prediction</div>
     <h1>TextGen<br/>Studio</h1>
-    <p>load your model · type a seed · watch it write</p>
+    <p>type a seed · watch it write</p>
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── Model Upload ──
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown("""<p style="font-family:'DM Mono',monospace;font-size:0.72rem;letter-spacing:0.15em;
-text-transform:uppercase;color:#7a6fa0;margin-bottom:1rem;">① Upload Model Files</p>""",
-unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    model_file = st.file_uploader("Model (.h5)", type=["h5"], label_visibility="visible")
-with col2:
-    tokenizer_file = st.file_uploader("Tokenizer (.pkl)", type=["pkl"], label_visibility="visible")
-with col3:
-    maxlen_file = st.file_uploader("Maxlen (.pkl)", type=["pkl"], label_visibility="visible")
+# ─── Load Model Automatically ────────────────────────────────────────────────
+model, tokenizer, max_seq_len = load_model_files()
 
-st.markdown('</div>', unsafe_allow_html=True)
+if model is None:
+    st.markdown("""
+    <div class="error-box">
+    ⚠ Model files not found! <br><br>
+    Please make sure these files exist in the repo folder:
+    <ul>
+      <li><b>model_light.h5</b></li>
+      <li><b>tokenizer.pkl</b></li>
+      <li><b>maxlen.pkl</b></li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
-# ── Load button + state ──
-model, tokenizer, max_seq_len = None, None, None
 
-if model_file and tokenizer_file and maxlen_file:
-    try:
-        with st.spinner("Loading model…"):
-            model, tokenizer, max_seq_len = load_model_files(
-                model_file, tokenizer_file, maxlen_file
-            )
-        st.success(f"✦ Model loaded — vocab size: {len(tokenizer.word_index):,}  ·  seq length: {max_seq_len}")
-    except Exception as e:
-        st.markdown(f'<div class="error-box">⚠ Failed to load model: {e}</div>', unsafe_allow_html=True)
+st.success(f"✦ Model loaded — vocab size: {len(tokenizer.word_index):,}  ·  seq length: {max_seq_len}")
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── Generation Controls ──
+
+# ─── Generation Controls ─────────────────────────────────────────────────────
 st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown("""<p style="font-family:'DM Mono',monospace;font-size:0.72rem;letter-spacing:0.15em;
-text-transform:uppercase;color:#7a6fa0;margin-bottom:1rem;">② Configure Generation</p>""",
-unsafe_allow_html=True)
 
 seed_text = st.text_input(
     "Seed text",
-    placeholder="e.g.  the history of science",
+    placeholder="e.g. the history of science",
     help="Model will continue from this text"
 )
 
@@ -358,38 +304,29 @@ with col_b:
     temperature = st.select_slider(
         "Creativity (temperature)",
         options=[0.3, 0.5, 0.7, 1.0, 1.2, 1.5],
-        value=1.0,
-        help="Low = predictable, High = creative"
+        value=1.0
     )
 
 generate_btn = st.button("✦  Generate Text", use_container_width=True)
+
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Output ──
+
+# ─── Output ──────────────────────────────────────────────────────────────────
 if generate_btn:
-    if model is None:
-        st.markdown('<div class="error-box">⚠ Upload all three model files first.</div>', unsafe_allow_html=True)
-    elif not seed_text.strip():
+    if not seed_text.strip():
         st.markdown('<div class="error-box">⚠ Enter a seed text to start generation.</div>', unsafe_allow_html=True)
     else:
         with st.spinner("Generating…"):
             try:
-                result = generate_text(
-                    seed_text, next_words, model, tokenizer, max_seq_len, temperature
-                )
+                result = generate_text(seed_text, next_words, model, tokenizer, max_seq_len, temperature)
                 generated_part = result[len(seed_text):].strip()
 
                 st.markdown(f"""
                 <div class="output-box">
                     <div class="output-label">✦ Generated Output</div>
                     <div class="output-text">
-                        <span class="output-seed">{seed_text}</span>
-                        <span class="output-generated"> {generated_part}</span>
-                    </div>
-                    <div class="stats-row">
-                        <span class="stat-pill">words: {next_words}</span>
-                        <span class="stat-pill">temp: {temperature}</span>
-                        <span class="stat-pill">total chars: {len(result)}</span>
+                        <b>{seed_text}</b> {generated_part}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -403,11 +340,3 @@ if generate_btn:
 
             except Exception as e:
                 st.markdown(f'<div class="error-box">⚠ Generation error: {e}</div>', unsafe_allow_html=True)
-
-# ── Footer ──
-st.markdown("""
-<div style="text-align:center;margin-top:4rem;font-family:'DM Mono',monospace;
-font-size:0.62rem;letter-spacing:0.15em;color:#2d2840;text-transform:uppercase;">
-    LSTM · TensorFlow · Streamlit &nbsp;✦&nbsp; TextGen Studio
-</div>
-""", unsafe_allow_html=True)
